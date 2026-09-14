@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>電訊 · 即時新聞</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  :root{
+    --paper:#F5F1E6;
+    --paper-dim:#EAE4D3;
+    --ink:#1E1B14;
+    --ink-soft:#5C564A;
+    --rule:#C9BFA6;
+    --wire:#8A3B2B;
+    --wire-dim:#B8694F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Noto Serif TC', serif;
+    min-height:100vh;
+  }
+  header{
+    border-bottom:3px double var(--ink);
+    padding:22px 20px 14px;
+    text-align:center;
+    position:relative;
+  }
+  header .masthead{
+    font-size:32px;
+    font-weight:700;
+    letter-spacing:6px;
+    margin:0;
+  }
+  header .sub{
+    font-family:'Space Mono', monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-top:6px;
+    letter-spacing:1px;
+  }
+  #clock{
+    position:absolute;
+    right:20px;
+    top:24px;
+    font-family:'Space Mono', monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+  }
+
+  .tabs{
+    display:flex;
+    flex-wrap:wrap;
+    gap:0;
+    border-bottom:1px solid var(--rule);
+    background:var(--paper-dim);
+    overflow-x:auto;
+  }
+  .tab{
+    font-family:'Space Mono', monospace;
+    font-size:12px;
+    letter-spacing:.5px;
+    padding:12px 16px;
+    cursor:pointer;
+    color:var(--ink-soft);
+    white-space:nowrap;
+    border-right:1px solid var(--rule);
+    user-select:none;
+  }
+  .tab:hover{ color:var(--ink); }
+  .tab.active{
+    background:var(--paper);
+    color:var(--wire);
+    font-weight:700;
+    border-bottom:2px solid var(--wire);
+    margin-bottom:-1px;
+  }
+
+  main{
+    max-width:760px;
+    margin:0 auto;
+    padding:24px 20px 80px;
+  }
+
+  .feed-group{
+    margin-bottom:34px;
+  }
+  .feed-group h2{
+    font-family:'Space Mono', monospace;
+    font-size:12px;
+    letter-spacing:2px;
+    color:var(--wire);
+    border-bottom:1px solid var(--rule);
+    padding-bottom:6px;
+    margin:0 0 4px;
+  }
+
+  .item{
+    display:block;
+    padding:14px 0;
+    border-bottom:1px solid var(--rule);
+    text-decoration:none;
+    color:var(--ink);
+  }
+  .item:last-child{ border-bottom:none; }
+  .item .headline{
+    font-size:18px;
+    line-height:1.5;
+    font-weight:600;
+  }
+  .item:hover .headline{ color:var(--wire); }
+  .item .meta{
+    font-family:'Space Mono', monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-top:6px;
+    letter-spacing:.3px;
+  }
+  .item .snippet{
+    font-size:14px;
+    color:var(--ink-soft);
+    margin-top:6px;
+    line-height:1.6;
+  }
+
+  .status{
+    font-family:'Space Mono', monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+    text-align:center;
+    padding:40px 0;
+  }
+  .status.error{ color:var(--wire); }
+
+  .refresh-bar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    max-width:760px;
+    margin:16px auto 0;
+    padding:0 20px;
+    font-family:'Space Mono', monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+  }
+  #refreshBtn{
+    background:none;
+    border:1px solid var(--ink-soft);
+    color:var(--ink);
+    font-family:'Space Mono', monospace;
+    font-size:11px;
+    padding:6px 12px;
+    cursor:pointer;
+    letter-spacing:1px;
+  }
+  #refreshBtn:hover{ border-color:var(--wire); color:var(--wire); }
+  #refreshBtn:disabled{ opacity:.4; cursor:default; }
+
+  ::-webkit-scrollbar{ height:6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="clock"></div>
+  <h1 class="masthead">電 訊</h1>
+  <div class="sub">中立媒體即時新聞聚合 · REUTERS / AP / AFP / BLOOMBERG / CNA / PTS / THE REPORTER</div>
+</header>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="refresh-bar">
+  <span id="lastUpdated">尚未載入</span>
+  <button id="refreshBtn">重新整理 ⟳</button>
+</div>
+
+<main id="main">
+  <div class="status">選擇上方分類以載入新聞…</div>
+</main>
+
+<script>
+// 純 CORS 代理，只負責把原始 XML 轉送出來，不對 feed 內容做任何轉換或限流。
+const PROXY = 'https://api.allorigins.win/raw?url=';
+const PROXY_FALLBACK = 'https://corsproxy.io/?url=';
+
+// 來源設定
+// 中央社／公視／報導者：官方 RSS。
+// Reuters / AP / AFP / Bloomberg：這幾家已不再提供公開即時 RSS（僅供付費企業用戶），
+// 這裡改用 Google News 的「site: 限定搜尋」RSS 做為近似替代——
+// 抓到的是 Google 收錄到的該媒體報導標題與連結，不是官方原生 feed，更新頻率也受限於 Google 索引速度。
+const SOURCES = {
+  wire: {
+    label: '國際通訊社（近似 · via Google News）',
+    feeds: [
+      { name: 'Reuters', url: 'https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant' },
+      { name: 'AP', url: 'https://news.google.com/rss/search?q=site:apnews.com+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant' },
+      { name: 'AFP', url: 'https://news.google.com/rss/search?q=site:afp.com+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant' },
+      { name: 'Bloomberg', url: 'https://news.google.com/rss/search?q=site:bloomberg.com+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant' },
+    ]
+  },
+  cna: {
+    label: '中央社 CNA',
+    feeds: [
+      { name: '即時', url: 'https://feeds.feedburner.com/rsscna/intworld' },
+      { name: '政治', url: 'https://feeds.feedburner.com/rsscna/politics' },
+      { name: '產經證券', url: 'https://feeds.feedburner.com/rsscna/finance' },
+      { name: '科技', url: 'https://feeds.feedburner.com/rsscna/technology' },
+    ]
+  },
+  pts: {
+    label: '公視新聞網 PTS',
+    feeds: [
+      { name: '公視新聞', url: 'https://about.pts.org.tw/rss/XML/newsfeed.xml' },
+    ]
+  },
+  reporter: {
+    label: '報導者 The Reporter',
+    feeds: [
+      { name: '報導者', url: 'https://www.twreporter.org/a/rss2.xml' },
+    ]
+  }
+};
+
+let currentTab = 'cna';
+
+function initTabs(){
+  const tabsEl = document.getElementById('tabs');
+  Object.keys(SOURCES).forEach(key=>{
+    const el = document.createElement('div');
+    el.className = 'tab' + (key===currentTab ? ' active' : '');
+    el.textContent = SOURCES[key].label;
+    el.onclick = () => { currentTab = key; render(); };
+    el.dataset.key = key;
+    tabsEl.appendChild(el);
+  });
+}
+
+function updateTabActive(){
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.classList.toggle('active', t.dataset.key === currentTab);
+  });
+}
+
+function timeAgo(dateStr){
+  const d = new Date(dateStr);
+  if(isNaN(d)) return '';
+  const diffMin = Math.floor((Date.now() - d.getTime())/60000);
+  if(diffMin < 1) return '剛剛';
+  if(diffMin < 60) return diffMin + ' 分鐘前';
+  const diffHr = Math.floor(diffMin/60);
+  if(diffHr < 24) return diffHr + ' 小時前';
+  return d.toLocaleDateString('zh-TW', {month:'numeric', day:'numeric'});
+}
+
+function stripHtml(html){
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html || '';
+  return (tmp.textContent || '').trim();
+}
+
+function text(node, selector){
+  const el = node.querySelector(selector);
+  return el ? el.textContent.trim() : '';
+}
+
+function parseXmlFeed(xmlString, feedName){
+  const doc = new DOMParser().parseFromString(xmlString, 'text/xml');
+  if(doc.querySelector('parsererror')) throw new Error('XML 解析失敗');
+
+  // 支援 RSS 2.0 <item> 與 Atom <entry> 兩種格式
+  const rssItems = Array.from(doc.querySelectorAll('item'));
+  const atomItems = Array.from(doc.querySelectorAll('entry'));
+
+  if(rssItems.length){
+    return rssItems.map(node => ({
+      source: feedName,
+      title: text(node, 'title'),
+      link: text(node, 'link') || (node.querySelector('link')?.getAttribute('href') || ''),
+      date: text(node, 'pubDate') || text(node, 'published') || text(node, 'updated'),
+      snippet: stripHtml(text(node, 'description') || text(node, 'summary')).slice(0,110)
+    }));
+  }
+  return atomItems.map(node => ({
+    source: feedName,
+    title: text(node, 'title'),
+    link: node.querySelector('link')?.getAttribute('href') || '',
+    date: text(node, 'published') || text(node, 'updated'),
+    snippet: stripHtml(text(node, 'summary') || text(node, 'content')).slice(0,110)
+  }));
+}
+
+async function fetchViaProxy(proxyBase, feedUrl){
+  const res = await fetch(proxyBase + encodeURIComponent(feedUrl));
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  return await res.text();
+}
+
+async function fetchFeed(feed){
+  let xml;
+  try{
+    xml = await fetchViaProxy(PROXY, feed.url);
+  }catch(e1){
+    xml = await fetchViaProxy(PROXY_FALLBACK, feed.url); // 主代理失敗時換備援代理
+  }
+  const items = parseXmlFeed(xml, feed.name);
+  if(!items.length) throw new Error(feed.name + ' 無內容');
+  return items;
+}
+
+async function render(){
+  updateTabActive();
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="status">載入中…</div>';
+  document.getElementById('refreshBtn').disabled = true;
+
+  const group = SOURCES[currentTab];
+  try{
+    const results = await Promise.allSettled(group.feeds.map(fetchFeed));
+    let allItems = [];
+    let anyOk = false;
+    results.forEach(r => {
+      if(r.status === 'fulfilled'){ anyOk = true; allItems = allItems.concat(r.value); }
+    });
+    allItems.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+    if(!anyOk || allItems.length === 0){
+      main.innerHTML = '<div class="status error">此分類目前無法取得新聞，稍後再試，或該來源暫無更新。</div>';
+    } else {
+      main.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.className = 'feed-group';
+      wrap.innerHTML = '<h2>' + group.label + '</h2>';
+      allItems.slice(0, 40).forEach(item => {
+        const a = document.createElement('a');
+        a.className = 'item';
+        a.href = item.link;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.innerHTML = `
+          <div class="headline">${item.title}</div>
+          <div class="meta">${item.source} · ${timeAgo(item.date)}</div>
+          ${item.snippet ? `<div class="snippet">${item.snippet}…</div>` : ''}
+        `;
+        wrap.appendChild(a);
+      });
+      main.appendChild(wrap);
+    }
+  } catch(e){
+    main.innerHTML = '<div class="status error">載入發生錯誤：' + e.message + '</div>';
+  }
+  document.getElementById('lastUpdated').textContent = '最後更新 ' + new Date().toLocaleTimeString('zh-TW');
+  document.getElementById('refreshBtn').disabled = false;
+}
+
+function tickClock(){
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('zh-TW', {hour12:false});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+document.getElementById('refreshBtn').onclick = render;
+
+initTabs();
+render();
+</script>
+</body>
+</html>
