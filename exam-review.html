@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>段考複習安排</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#ffffff; --ink:#000000; --muted:#6b6b6b; --grid:#000000; --head:#cfe2f3; --hover:#f3f6fa; --done:#eeeeee; --err:#c0392b;
+  --font:"Huninn","jf-openhuninn","PingFang TC","Microsoft JhengHei",sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:17px;line-height:1.5;padding-inline:16px;padding-block:24px 48px}
+.wrap{max-width:1280px;margin:0 auto}
+h1{font-size:23px;font-weight:700;margin:0 0 18px}
+.rules{list-style:none;margin:0 0 22px;padding:0;font-weight:700;font-size:16px;display:flex;flex-direction:column;gap:4px}
+.rules:empty{display:none}
+
+/* D-day */
+.dday{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid var(--grid);background:var(--dd,#cfe2f3);padding:12px 16px;margin:0 0 18px}
+.dday .big{font-size:30px;font-weight:700;line-height:1.1;letter-spacing:.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dday .line{flex:1 1 220px;min-width:0;font-size:18px}
+.dday .when{font-size:13px;color:#333;width:100%;margin-top:-6px}
+
+/* 電腦版：一張格線表 */
+.scroller{overflow-x:auto}
+.table{display:grid;border-top:1px solid var(--grid);border-left:1px solid var(--grid);min-width:760px}
+.cell{border-right:1px solid var(--grid);border-bottom:1px solid var(--grid);padding:6px 10px;min-width:0;display:flex;align-items:center}
+.hd{background:var(--head);justify-content:center}
+.subj{justify-content:center}
+.btn{justify-content:center;cursor:pointer;background:var(--bg);font:inherit;color:var(--ink);border-top:0;border-left:0;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent;text-align:center}
+.btn:hover{background:var(--hover)}
+.btn:focus-visible{outline:2px solid #3c78d8;outline-offset:-3px}
+.btn.saving{opacity:.5}
+.btn.task[aria-pressed="true"]{background:var(--done);color:var(--muted);text-decoration:line-through;text-decoration-thickness:1.5px}
+.btn.add{color:var(--muted);font-size:15px}
+.btn .n{display:none}
+
+/* 手機版 */
+.mlist{border-top:1px solid var(--grid);border-left:1px solid var(--grid)}
+.mlist .subj{padding-block:8px;font-size:17px}
+.mlist .txt{border-bottom:1px dashed #999}
+.mrow{display:flex;flex-wrap:wrap;border-right:1px solid var(--grid);border-bottom:1px solid var(--grid)}
+.mrow.fixed{display:grid;grid-template-columns:repeat(var(--n,5),minmax(0,1fr))}
+.mrow .btn{min-height:44px;border-bottom:0;flex:0 0 auto;padding-inline:14px}
+.mrow.fixed .btn:last-child{border-right:0}
+.mrow .btn .n{display:inline;font-size:12px;color:var(--muted)}
+.mrow .btn[aria-pressed="true"] .n{display:none}
+.mrow .range{font-size:12px;color:var(--muted);margin-left:4px}
+.mrow.none{display:none}
+
+.msg{margin:14px 0 0;font-size:14px;color:var(--err)}
+.loading{color:var(--muted);padding:24px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title"></h1>
+  <div class="dday" id="dday" hidden><span class="big" id="ddBig"></span><span class="line" id="ddLine"></span><span class="when" id="ddWhen"></span></div>
+  <ul class="rules" id="rules"></ul>
+  <div id="sheet"><div class="loading">讀取中…</div></div>
+  <p class="msg" id="msg" hidden></p>
+</div>
+
+<script>
+/* ===== 設定 ===== */
+const API = "https://script.google.com/macros/library/d/1xbU-mKdvwlLti6COIYeR8zxSeABhEm3X7X8wre27aTOWPSRRSWuZoWzt/2";   // 例：https://script.google.com/macros/s/AKfy.../exec
+const DEFAULT_SHEET = "1003-1013";               // 網址沒有 ?sheet= 時開這個分頁
+const POLL_MS = 30000;                           // 每 30 秒自動更新
+
+/* 試算表標題下方可加兩行設定（不會顯示在頁面上）：
+     考試日期：11/5、11/6
+     倒數主題：Roblox        （沒寫就用 K-pop）                    */
+const THEMES = {
+  kpop: {
+    stage: d => d >= 6 ? "far" : d >= 4 ? "near" : "d" + d,
+    dayLabel: ["D-DAY", "D-DAY 2"],
+    text: {
+      far:  ["練習生時期 🎧 每天練一點，出道才會穩", "練習室的燈還亮著，今天也練一首吧 🎶", "出道前的每一天都算數 ✨"],
+      near: ["Teaser 已公開！回歸倒數，進度要跟上", "預告照拍完了，現在是錄音期 🎙️"],
+      d3:   ["進入最後彩排 💪 重點舞步再對一次", "彩排倒數，還不熟的段落再練一遍"],
+      d2:   ["打歌服已準備好，今晚練完就收工", "後天就上台，錯題就是你的提詞卡 📒"],
+      d1:   ["明天正式出道舞台 ✨ 睡飽就是最好的應援", "明天就上台了！文具備好，早點睡 🌙"],
+      day1: ["第一場舞台開演，화이팅！🔥"],
+      last: ["最終場！把一位帶回家 🏆"],
+      done: ["回歸活動圓滿結束 🎤 辛苦了，換你當觀眾追星吧！"],
+    },
+  },
+  roblox: {
+    stage: d => d >= 8 ? "far" : d >= 4 ? "near" : "d" + d,
+    dayLabel: ["考試日", "考試日 2"],
+    text: {
+      far:  ["新地圖開啟 🧱 一天過一關，慢慢踩到存檔點", "每讀完一課，就多踩到一個存檔點 ✅", "裝備一件一件升級中 ⚔️"],
+      near: ["地圖過半，存檔點越來越多了", "練功時間，經驗值正在累積 📈"],
+      d3:   ["Boss 關前最後補給，錯題再刷一次 💪"],
+      d2:   ["裝備都齊了，今晚練完就下線休息"],
+      d1:   ["明天打 Boss！早點登出，睡飽血量才會滿 ❤️"],
+      day1: ["Boss 第一戰開打，出發！🎮"],
+      last: ["最終關卡！撐過去就通關 🏆"],
+      done: ["通關！🎉 辛苦了，今天可以好好玩一下"],
+    },
+  },
+};
+
+/* ===== 以下不用改 ===== */
+const SHEET = new URLSearchParams(location.search).get("sheet") || DEFAULT_SHEET;
+const FALLBACK = {"國文":"#d9ead3","國語":"#d9ead3","數學":"#ffe599","理化":"#ead1dc","自然":"#ead1dc","英文":"#c9daf8","地理":"#d9d9d9","歷史":"#e6b8af","公民":"#d0e0e3","社會":"#d0e0e3"};
+const DATE_LINE = /考試日期/, THEME_LINE = /倒數主題/;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const mq = matchMedia("(max-width:640px)");
+
+let data = null, sig = "";
+const pending = new Map();   // 送出中的狀態：key -> 期望值
+const inflight = new Map();  // key -> 尚未完成的請求數
+
+function showMsg(t){ const m = $("msg"); m.textContent = t || ""; m.hidden = !t; }
+const subjBg = (subject, color) => color && color.toLowerCase() !== "#ffffff" ? color : (FALLBACK[subject] || "#eeeeee");
+const shortName = c => (c.match(/^[0-9A-Za-z\-~.]+/) || c.match(/^\S+/) || [c])[0];
+const val = (key, server) => pending.has(key) ? pending.get(key) : server;
+
+/* ---------- 版面 ---------- */
+function model(){
+  const rows = data.rows, idx = new Map(rows.map((r, i) => [r.row, i]));
+  const tasks = (data.tasks || []).map(t => {
+    let span = 0; for (let k = 0; k < t.rowspan; k++) if (idx.has(t.row + k)) span++;
+    return { ...t, i0: idx.get(t.row), span: Math.max(span, 1) };
+  }).filter(t => t.i0 != null);
+  let n = data.mode === "fixed" ? data.headers.length : 0;
+  tasks.forEach(t => n = Math.max(n, t.col + t.colspan));
+  rows.forEach(r => { if (r.kind === "count") n = Math.max(n, val("c:" + r.row, r.count) + 1); });
+  return { rows, tasks, n: Math.max(n, 1) };
+}
+
+function btnFixed(r, c, style = ""){
+  const k = `f:${r.row}:${c}`, on = val(k, r.checks[c]);
+  return `<button type="button" class="cell btn${inflight.has(k) ? " saving" : ""}" style="${style}" data-op="fixed" data-row="${r.row}" data-col="${c}" aria-pressed="${on}" aria-label="${esc(r.content)} ${esc(data.headers[c] || "")}"><span class="n">${on ? "" : c + 1}</span>${on ? "v" : ""}</button>`;
+}
+function btnTask(t, extra = "", style = ""){
+  const k = `t:${t.row}:${t.col}`, on = val(k, t.done);
+  return `<button type="button" class="cell btn task${inflight.has(k) ? " saving" : ""}" style="${style}" data-op="task" data-row="${t.row}" data-col="${t.col}" aria-pressed="${on}">${esc(t.text)}${extra}</button>`;
+}
+function btnsCount(r, styleFn){
+  const k = "c:" + r.row, cnt = val(k, r.count), sv = inflight.has(k) ? " saving" : "";
+  let h = "";
+  for (let i = 0; i < cnt; i++) {
+    const last = i === cnt - 1;
+    h += `<button type="button" class="cell btn${sv}" style="${styleFn(i)}" data-op="count" data-row="${r.row}" data-delta="${last ? -1 : 0}" aria-label="${esc(r.content)} 第${i + 1}遍${last ? "，點一下收回" : ""}">v</button>`;
+  }
+  h += `<button type="button" class="cell btn add${sv}" style="${styleFn(cnt)}" data-op="count" data-row="${r.row}" data-delta="1" aria-label="${esc(r.content)} 再讀一遍">＋</button>`;
+  return h;
+}
+
+function renderDesktop({ rows, tasks, n }){
+  const occ = rows.map(() => new Array(n).fill(false));
+  const at = (g, c, span = 1, cspan = 1) => `grid-row:${g} / span ${span};grid-column:${c} / span ${cspan}`;
+  let h = `<div class="scroller"><div class="table" style="grid-template-columns:110px minmax(200px,1fr) repeat(${n},minmax(78px,auto))">`;
+  h += `<div class="cell hd" style="${at(1, 1)}">科目</div><div class="cell hd" style="${at(1, 2)}">內容</div>`;
+  for (let c = 0; c < n; c++) h += `<div class="cell hd" style="${at(1, c + 3)}">${esc(data.headers[c] || "")}</div>`;
+  for (let i = 0; i < rows.length;) {
+    let j = i; while (j + 1 < rows.length && rows[j + 1].subject === rows[i].subject) j++;
+    h += `<div class="cell subj" style="${at(i + 2, 1, j - i + 1)};background:${esc(subjBg(rows[i].subject, rows[i].color))}">${esc(rows[i].subject)}</div>`;
+    i = j + 1;
+  }
+  rows.forEach((r, ri) => {
+    const g = ri + 2;
+    h += `<div class="cell" style="${at(g, 2)}">${esc(r.content)}</div>`;
+    if (r.kind === "fixed") for (let c = 0; c < n; c++) { occ[ri][c] = true; h += btnFixed(r, c, at(g, c + 3)); }
+    if (r.kind === "count") h += btnsCount(r, c => { occ[ri][c] = true; return at(g, c + 3); });
+  });
+  tasks.forEach(t => {
+    for (let a = 0; a < t.span; a++) for (let b = 0; b < t.colspan; b++) if (occ[t.i0 + a]) occ[t.i0 + a][t.col + b] = true;
+    h += btnTask(t, "", at(t.i0 + 2, t.col + 3, t.span, t.colspan));
+  });
+  rows.forEach((r, ri) => { for (let c = 0; c < n; c++) if (!occ[ri][c]) h += `<div class="cell" style="${at(ri + 2, c + 3)}"></div>`; });
+  return h + `</div></div>`;
+}
+
+function renderMobile({ rows, tasks, n }){
+  const byFirst = new Map();
+  tasks.slice().sort((a, b) => a.col - b.col).forEach(t => { if (!byFirst.has(t.i0)) byFirst.set(t.i0, []); byFirst.get(t.i0).push(t); });
+  let h = `<div class="mlist">`, last = null;
+  rows.forEach((r, ri) => {
+    if (r.subject !== last) { last = r.subject; h += `<div class="cell subj" style="background:${esc(subjBg(r.subject, r.color))}">${esc(r.subject)}</div>`; }
+    h += `<div class="cell txt">${esc(r.content)}</div>`;
+    if (r.kind === "fixed") {
+      h += `<div class="mrow fixed" style="--n:${n}">`;
+      for (let c = 0; c < n; c++) h += btnFixed(r, c);
+      h += `</div>`;
+    } else if (r.kind === "count") {
+      h += `<div class="mrow">${btnsCount(r, () => "")}</div>`;
+    } else {
+      const list = byFirst.get(ri) || [];
+      h += `<div class="mrow${list.length ? "" : " none"}">` + list.map(t => {
+        const range = t.span > 1 ? `<span class="range">${esc(shortName(r.content))}～${esc(shortName(rows[t.i0 + t.span - 1].content))}</span>` : "";
+        return btnTask(t, range);
+      }).join("") + `</div>`;
+    }
+  });
+  return h + `</div>`;
+}
+
+function render(){
+  const s = JSON.stringify([data, [...pending], [...inflight.keys()], mq.matches]);
+  if (s === sig) return; sig = s;
+  const notes = data.notes || [];
+  $("title").textContent = data.title;
+  document.title = data.title.replace(/^\p{Extended_Pictographic}\s*/u, "");
+  $("rules").innerHTML = notes.filter(x => !DATE_LINE.test(x) && !THEME_LINE.test(x)).map(x => `<li>${esc(x)}</li>`).join("");
+  const dl = notes.find(x => DATE_LINE.test(x)), tl = notes.find(x => THEME_LINE.test(x));
+  examDates = dl ? parseDates(dl) : null;
+  theme = tl && /roblox/i.test(tl) ? THEMES.roblox : THEMES.kpop;
+  ddKey = ""; renderDday();
+  const a = document.activeElement, focus = a && a.classList && a.classList.contains("btn") ? { ...a.dataset } : null;
+  $("sheet").innerHTML = (mq.matches ? renderMobile : renderDesktop)(model());
+  if (focus) {
+    const el = [...document.querySelectorAll(".btn")].find(b => b.dataset.op === focus.op && b.dataset.row === focus.row && b.dataset.col === focus.col && (focus.op !== "count" || b.dataset.delta === "1"));
+    if (el) el.focus({ preventScroll: true });
+  }
+}
+mq.addEventListener("change", () => { sig = ""; if (data) render(); });
+
+/* ---------- D-day ---------- */
+const WEEK = "日一二三四五六";
+let examDates = null, theme = THEMES.kpop, ddKey = "";
+const ddPick = {};
+function todayTW(){
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const [y, mo, d] = p.split("-").map(Number);
+  return Date.UTC(y, mo - 1, d);
+}
+function parseDates(text){
+  const today = todayTW(), y0 = new Date(today).getUTCFullYear(), out = [];
+  const re = /(?:(\d{4})[-\/.])?(\d{1,2})[-\/.](\d{1,2})/g; let m;
+  while ((m = re.exec(text))) {
+    const y = m[1] ? +m[1] : y0;
+    let t = Date.UTC(y, +m[2] - 1, +m[3]);
+    if (!m[1] && t < today - 180 * 864e5) t = Date.UTC(y + 1, +m[2] - 1, +m[3]);
+    out.push(t);
+  }
+  return out.length ? out.sort((a, b) => a - b) : null;
+}
+function pick(group){
+  const k = theme.dayLabel[0] + group, arr = theme.text[group];
+  if (!(k in ddPick)) ddPick[k] = arr[Math.floor(Math.random() * arr.length)];
+  return ddPick[k];
+}
+function renderDday(){
+  const box = $("dday");
+  if (!examDates) { box.hidden = true; return; }
+  const today = todayTW(), first = examDates[0], lastD = examDates[examDates.length - 1];
+  let big, group, bg = "#cfe2f3";
+  if (today > lastD) { big = "🎉"; group = "done"; bg = "#d9ead3"; }
+  else if (today >= first) {
+    const i = Math.max(0, examDates.indexOf(today));
+    big = i > 0 ? theme.dayLabel[1].replace(/2$/, String(i + 1)) : theme.dayLabel[0];
+    group = i > 0 && today === lastD ? "last" : "day1"; bg = "#f4cccc";
+  } else {
+    const d = Math.round((first - today) / 864e5);
+    big = "D-" + d; group = theme.stage(d); if (d <= 3) bg = "#fce5cd";
+  }
+  const key = big + group; if (key === ddKey) return; ddKey = key;
+  const fmt = t => { const x = new Date(t); return `${x.getUTCMonth() + 1}/${x.getUTCDate()}（${WEEK[x.getUTCDay()]}）`; };
+  $("ddBig").textContent = big;
+  $("ddLine").textContent = pick(group);
+  $("ddWhen").textContent = "考試 " + examDates.map(fmt).join("、");
+  box.style.setProperty("--dd", bg); box.hidden = false;
+}
+
+/* ---------- 讀取 ---------- */
+function normalize(j){
+  if (!j.mode) { j.mode = "fixed"; j.tasks = []; j.rows.forEach(r => r.kind = "fixed"); } // 舊版 Apps Script
+  return j;
+}
+async function load(){
+  try {
+    const res = await fetch(`${API}?sheet=${encodeURIComponent(SHEET)}&t=${Date.now()}`);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error);
+    data = normalize(j); render(); showMsg("");
+  } catch (e) {
+    if (!data) $("sheet").innerHTML = "";
+    showMsg("讀不到 Google 試算表，請檢查網路後重新整理頁面。（" + e.message + "）");
+  }
+}
+
+/* ---------- 寫入（依序送出） ---------- */
+let queue = Promise.resolve();
+function send(key, body){
+  inflight.set(key, (inflight.get(key) || 0) + 1);
+  queue = queue.then(async () => {
+    let fresh = null, err = null;
+    try {
+      const res = await fetch(API, { method: "POST", body: JSON.stringify({ sheet: SHEET, ...body }) });
+      const j = await res.json();
+      if (j.error) err = j.error; else fresh = normalize(j);
+    } catch (e) { err = e.message; }
+    const left = inflight.get(key) - 1;
+    if (left <= 0) { inflight.delete(key); pending.delete(key); } else inflight.set(key, left);
+    if (err === "stale") { pending.delete(key); showMsg("試算表內容剛被修改過，已重新載入，請再點一次。"); await load(); return; }
+    if (err) { pending.delete(key); showMsg("沒有存到試算表，請再點一次。（" + err + "）"); }
+    else showMsg("");
+    if (fresh) data = fresh;
+    render();
+  });
+}
+
+$("sheet").addEventListener("click", e => {
+  const b = e.target.closest(".btn"); if (!b || !data) return;
+  const op = b.dataset.op, row = +b.dataset.row, r = data.rows.find(x => x.row === row); if (!r) return;
+  if (op === "fixed") {
+    const col = +b.dataset.col, k = `f:${row}:${col}`, on = !val(k, r.checks[col]);
+    pending.set(k, on); send(k, { op, row, col, on, content: r.content });
+  } else if (op === "task") {
+    const col = +b.dataset.col, t = data.tasks.find(x => x.row === row && x.col === col); if (!t) return;
+    const k = `t:${row}:${col}`, on = !val(k, t.done);
+    pending.set(k, on); send(k, { op, row, col, on, text: t.text, content: r.content });
+  } else if (op === "count") {
+    const delta = +b.dataset.delta; if (!delta) return;
+    const k = "c:" + row, cnt = val(k, r.count) + delta; if (cnt < 0) return;
+    pending.set(k, cnt); send(k, { op, row, delta, content: r.content });
+  }
+  render();
+});
+
+/* ---------- 啟動 ---------- */
+if (!/^https:\/\/script\.google\.com\//.test(API)) {
+  $("sheet").innerHTML = "";
+  showMsg("尚未設定 Apps Script 網址：請把部署後的網址貼到 HTML 裡的 API。");
+} else {
+  load();
+  setInterval(() => { renderDday(); if (!document.hidden && inflight.size === 0) load(); }, POLL_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && inflight.size === 0) load(); });
+}
+</script>
+</body>
+</html>
